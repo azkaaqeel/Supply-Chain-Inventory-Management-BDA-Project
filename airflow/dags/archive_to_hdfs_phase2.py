@@ -163,12 +163,8 @@ with DAG(
     run_archival = BashOperator(
         task_id='trigger_archival',
         bash_command="""
-        export PYSPARK_PYTHON=/usr/bin/python3
-        export PYSPARK_DRIVER_PYTHON=/usr/bin/python3
         /opt/spark/bin/spark-submit \
             --master spark://spark-master:7077 \
-            --conf spark.pyspark.python=/usr/bin/python3 \
-            --conf spark.pyspark.driver.python=/usr/bin/python3 \
             --conf spark.mongodb.read.connection.uri=mongodb://admin:admin123@mongo:27017/supply_chain?authSource=admin \
             --conf spark.mongodb.write.connection.uri=mongodb://admin:admin123@mongo:27017/supply_chain?authSource=admin \
             --packages org.mongodb.spark:mongo-spark-connector_2.12:10.3.0,org.apache.hadoop:hadoop-client:3.3.4 \
@@ -177,10 +173,6 @@ with DAG(
             /opt/spark/jobs/archive_mongo_to_hdfs.py
         """,
         execution_timeout=timedelta(minutes=10),
-        env={
-            'PYSPARK_PYTHON': '/usr/bin/python3',
-            'PYSPARK_DRIVER_PYTHON': '/usr/bin/python3'
-        },
     )
     
     # ========================================

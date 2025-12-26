@@ -52,7 +52,7 @@ def read_mongo(spark, collection_name):
 # ============================================================
 def main():
     print("=" * 70)
-    print("🔥 PHASE 2: SUPPLY CHAIN KPI COMPUTATION")
+    print("PHASE 2: SUPPLY CHAIN KPI COMPUTATION (HOT + COLD OLAP)")
     print("=" * 70)
     
     # Initialize Spark with MongoDB connector
@@ -68,18 +68,27 @@ def main():
     # Set log level to reduce noise
     spark.sparkContext.setLogLevel("WARN")
     
+    # Log execution mode
+    master_url = spark.sparkContext.master
+    if "local" in master_url.lower():
+        print("\nExecution Mode: Spark LOCAL (single-process)")
+        print("Reason: Laptop/demo environment - avoids Python version mismatch")
+        print("Note: Still reads HDFS archives and performs OLAP unification\n")
+    else:
+        print(f"\nExecution Mode: Spark DISTRIBUTED ({master_url})\n")
+    
     # Calculate time windows
     now = datetime.now(timezone.utc)
     analysis_cutoff = now - timedelta(minutes=ANALYSIS_WINDOW_MINUTES)
     lookback_cutoff = now - timedelta(minutes=LOOKBACK_WINDOW_MINUTES)
     
-    print(f"📅 Analysis Window: Last {ANALYSIS_WINDOW_MINUTES} minutes")
-    print(f"📅 Lookback Window: Last {LOOKBACK_WINDOW_MINUTES} minutes")
+    print(f"Analysis Window: Last {ANALYSIS_WINDOW_MINUTES} minutes")
+    print(f"Lookback Window: Last {LOOKBACK_WINDOW_MINUTES} minutes")
     
     # ========================================
     # LOAD DATA (Facts + Dimensions)
     # ========================================
-    print("\n📥 Loading data from MongoDB...")
+    print("\nLoading data from MongoDB...")
     
     # Fact tables (time-windowed)
     orders = read_mongo(spark, "orders_fact").where(
@@ -106,14 +115,14 @@ def main():
     regions.cache()
     suppliers.cache()
     
-    print(f"✅ Orders: {orders.count():,}")
-    print(f"✅ Shipments: {shipments.count():,}")
-    print(f"✅ Inventory Events: {inventory.count():,}")
+    print(f"Orders: {orders.count():,}")
+    print(f"Shipments: {shipments.count():,}")
+    print(f"Inventory Events: {inventory.count():,}")
     
     # ========================================
     # KPI 1: TOTAL INVENTORY LEVEL
     # ========================================
-    print("\n📊 Computing KPI 1: Total Inventory Level...")
+    print("\nComputing KPI 1: Total Inventory Level...")
     
     kpi1_inventory_level = (
         inventory
@@ -137,12 +146,12 @@ def main():
     )
     
     kpi1_count = kpi1_inventory_level.count()
-    print(f"✅ KPI 1: {kpi1_count} SKU-DC combinations tracked")
+    print(f"Result: {kpi1_count} SKU-DC combinations tracked")
     
     # ========================================
     # KPI 2: STOCKOUT RISK (Days to Stockout)
     # ========================================
-    print("\n📊 Computing KPI 2: Stockout Risk...")
+    print("\nComputing KPI 2: Stockout Risk...")
     
     # Calculate demand velocity (units per day)
     demand_velocity = (
@@ -191,12 +200,12 @@ def main():
     )
     
     kpi2_high_risk_count = kpi2_stockout_risk.count()
-    print(f"⚠️  KPI 2: {kpi2_high_risk_count} high-risk items (< {STOCKOUT_THRESHOLD_DAYS} days supply)")
+    print(f"WARNING: KPI 2: {kpi2_high_risk_count} high-risk items (< {STOCKOUT_THRESHOLD_DAYS} days supply)")
     
     # ========================================
     # KPI 3: SUPPLIER LEAD TIME PERFORMANCE
     # ========================================
-    print("\n📊 Computing KPI 3: Supplier Lead Time Performance...")
+    print("\nComputing KPI 3: Supplier Lead Time Performance...")
     
     kpi3_supplier_performance = (
         shipments
@@ -227,12 +236,12 @@ def main():
     )
     
     kpi3_count = kpi3_supplier_performance.count()
-    print(f"✅ KPI 3: {kpi3_count} suppliers analyzed")
+    print(f"Result: KPI 3: {kpi3_count} suppliers analyzed")
     
     # ========================================
     # KPI 4: DC UTILIZATION RATE
     # ========================================
-    print("\n📊 Computing KPI 4: Distribution Center Utilization...")
+    print("\nComputing KPI 4: Distribution Center Utilization...")
     
     # Calculate current volume per DC
     # First join inventory with SKU storage requirements, then aggregate by DC
@@ -274,12 +283,12 @@ def main():
         col("utilization_rate") >= lit(DC_UTILIZATION_THRESHOLD)
     ).count()
     
-    print(f"⚠️  KPI 4: {kpi4_overloaded} DCs overloaded (> {DC_UTILIZATION_THRESHOLD*100}%)")
+    print(f"WARNING: KPI 4: {kpi4_overloaded} DCs overloaded (> {DC_UTILIZATION_THRESHOLD*100}%)")
     
     # ========================================
     # KPI 5: ORDER FULFILLMENT & REVENUE BY REGION
     # ========================================
-    print("\n📊 Computing KPI 5: Regional Fulfillment & Revenue...")
+    print("\nComputing KPI 5: Regional Fulfillment & Revenue...")
     
     kpi5_regional_performance = (
         orders
@@ -309,12 +318,12 @@ def main():
     )
     
     kpi5_count = kpi5_regional_performance.count()
-    print(f"✅ KPI 5: {kpi5_count} regions analyzed")
+    print(f"Result: KPI 5: {kpi5_count} regions analyzed")
     
     # ========================================
     # CACHE TO REDIS
     # ========================================
-    print("\n💾 Caching KPIs to Redis...")
+    print("\nCaching KPIs to Redis...")
     
     import redis
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
@@ -326,35 +335,35 @@ def main():
     # Store KPI 1: Inventory Level
     kpi1_data = [row.asDict() for row in kpi1_inventory_level.limit(100).collect()]
     r.set("kpi:inventory_level", json.dumps(kpi1_data, default=str))
-    print(f"  ✅ KPI 1: Cached {len(kpi1_data)} records")
+    print(f"  Result: KPI 1: Cached {len(kpi1_data)} records")
     
     # Store KPI 2: Stockout Alerts
     kpi2_data = [row.asDict() for row in kpi2_stockout_risk.limit(50).collect()]
     r.set("kpi:stockout_alerts", json.dumps(kpi2_data, default=str))
     r.set("kpi:stockout_risk_count", kpi2_high_risk_count)
-    print(f"  ✅ KPI 2: Cached {len(kpi2_data)} alerts")
+    print(f"  Result: KPI 2: Cached {len(kpi2_data)} alerts")
     
     # Store KPI 3: Supplier Performance
     kpi3_data = [row.asDict() for row in kpi3_supplier_performance.collect()]
     r.set("kpi:supplier_performance", json.dumps(kpi3_data, default=str))
-    print(f"  ✅ KPI 3: Cached {len(kpi3_data)} suppliers")
+    print(f"  Result: KPI 3: Cached {len(kpi3_data)} suppliers")
     
     # Store KPI 4: DC Utilization
     kpi4_data = [row.asDict() for row in kpi4_dc_utilization.collect()]
     r.set("kpi:dc_utilization", json.dumps(kpi4_data, default=str))
     r.set("kpi:dc_overloaded_count", kpi4_overloaded)
-    print(f"  ✅ KPI 4: Cached {len(kpi4_data)} DCs")
+    print(f"  Result: KPI 4: Cached {len(kpi4_data)} DCs")
     
     # Store KPI 5: Regional Performance
     kpi5_data = [row.asDict() for row in kpi5_regional_performance.collect()]
     r.set("kpi:regional_performance", json.dumps(kpi5_data, default=str))
-    print(f"  ✅ KPI 5: Cached {len(kpi5_data)} regions")
+    print(f"  Result: KPI 5: Cached {len(kpi5_data)} regions")
     
     # Set TTL on all KPI keys
     for key in r.keys("kpi:*"):
         r.expire(key, 120)  # 2 minutes TTL
     
-    print("\n✅ All KPIs computed and cached successfully!")
+    print("\nAll KPIs computed and cached successfully!")
     print("=" * 70)
     
     # Cleanup

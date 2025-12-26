@@ -57,6 +57,7 @@ services:
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+      - AIRFLOW__SCHEDULER__SCHEDULER_HEALTH_CHECK_THRESHOLD=120
       - MONGO_URI=mongodb://admin:admin123@mongo:27017/supply_chain?authSource=admin
       # Demo mode configuration (set DEMO_MODE=true for faster archival during presentations)
       - DEMO_MODE=true
@@ -82,7 +83,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G  # Increased for Spark local mode execution
         reservations:
           memory: 512M
 

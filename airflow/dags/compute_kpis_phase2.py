@@ -32,22 +32,22 @@ with DAG(
 ) as dag:
     
     # ========================================
-    # TASK: SPARK KPI COMPUTATION
+    # TASK: SPARK KPI COMPUTATION (DISTRIBUTED MODE)
     # ========================================
+    # Running in distributed mode with Spark master + workers cluster
+    # Python versions now aligned (Airflow 3.8 matches Spark 3.8)
     compute_kpis = BashOperator(
         task_id='spark_compute_kpis',
         bash_command="""
         /opt/spark/bin/spark-submit \
             --master spark://spark-master:7077 \
-            --conf spark.pyspark.python=/usr/bin/python3 \
-            --conf spark.pyspark.driver.python=/usr/bin/python3 \
             --conf spark.mongodb.read.connection.uri=mongodb://admin:admin123@mongo:27017/supply_chain?authSource=admin \
             --packages org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 \
             --driver-memory 512m \
             --executor-memory 512m \
             /opt/spark/jobs/compute_minute_kpis.py
         """,
-        execution_timeout=timedelta(minutes=2),
+        execution_timeout=timedelta(minutes=3),
     )
     
     # Single task in this DAG
