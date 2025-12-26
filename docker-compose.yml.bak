@@ -1,0 +1,194 @@
+services:
+  # ============================================================
+  # MONGODB - Fresh Data Storage (Hot)
+  # ============================================================
+  mongo:
+    image: mongo:6.0
+    container_name: mongo
+    command: --wiredTigerCacheSizeGB 0.5
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ============================================================
+  # GENERATOR - Statistical Data Streaming
+  # ============================================================
+  generator:
+    build: ./generator
+    container_name: generator
+    environment:
+      - MONGO_URI=mongodb://admin:admin123@mongo:27017/supply_chain?authSource=admin
+      - EVENTS_PER_MINUTE=1500
+      - GENERATION_INTERVAL_SECONDS=60
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ============================================================
+  # AIRFLOW - Orchestration (SequentialExecutor for Phase 1)
+  # ============================================================
+  airflow:
+    build: ./airflow
+    container_name: airflow
+    user: "50000:0"
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+      - MONGO_URI=mongodb://admin:admin123@mongo:27017/supply_chain?authSource=admin
+      # Demo mode configuration (set DEMO_MODE=true for faster archival during presentations)
+      - DEMO_MODE=false
+      - DEMO_THRESHOLD_MB=30
+      - ARCHIVE_THRESHOLD_MB=300
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./spark/jobs:/opt/spark/jobs
+      - airflow_db:/opt/airflow
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: >
+      bash -c "
+      airflow db migrate &&
+      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com 2>/dev/null || true &&
+      airflow webserver --port 8080 & airflow scheduler
+      "
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ============================================================
+  # REDIS - KPI Cache (Phase 2)
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ============================================================
+  # SPARK MASTER - Distributed Processing (Phase 2)
+  # ============================================================
+  spark-master:
+    build: ./spark
+    container_name: spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    environment:
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8081
+    ports:
+      - "7077:7077"  # Spark master
+      - "8081:8081"  # Spark UI (changed from 8080 to avoid Airflow conflict)
+    volumes:
+      - ./spark/jobs:/opt/spark/jobs
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ============================================================
+  # SPARK WORKER - Processing Node (Phase 2)
+  # ============================================================
+  spark-worker:
+    build: ./spark
+    container_name: spark-worker
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_WORKER_CORES=2
+    depends_on:
+      - spark-master
+    volumes:
+      - ./spark/jobs:/opt/spark/jobs
+    deploy:
+      resources:
+        limits:
+          memory: 1280M
+
+  # ============================================================
+  # HADOOP HDFS - NAMENODE (Phase 2)
+  # ============================================================
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    platform: linux/amd64  # Force x86 emulation on M1
+    container_name: namenode
+    environment:
+      - CLUSTER_NAME=supply_chain
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+      - HDFS_CONF_dfs_replication=1
+    ports:
+      - "9870:9870"  # NameNode UI
+      - "8020:8020"  # HDFS API
+    volumes:
+      - namenode_data:/hadoop/dfs/name
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ============================================================
+  # HADOOP HDFS - DATANODE (Phase 2)
+  # ============================================================
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    platform: linux/amd64  # Force x86 emulation on M1
+    container_name: datanode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+      - HDFS_CONF_dfs_replication=1
+    depends_on:
+      - namenode
+    ports:
+      - "9864:9864"  # DataNode UI
+    volumes:
+      - datanode_data:/hadoop/dfs/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  mongo_data:
+    driver: local
+  airflow_db:
+    driver: local
+  namenode_data:
+    driver: local
+  datanode_data:
+    driver: local
+

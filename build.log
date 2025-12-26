@@ -1,0 +1,129 @@
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.10kB done
+#1 DONE 0.0s
+
+#2 [generator internal] load build definition from Dockerfile
+#2 transferring dockerfile: 263B done
+#2 DONE 0.0s
+
+#3 [airflow internal] load build definition from Dockerfile
+#3 transferring dockerfile: 566B done
+#3 DONE 0.0s
+
+#4 [generator internal] load metadata for docker.io/library/python:3.11-slim
+#4 ...
+
+#5 [auth] apache/airflow:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#6 [auth] library/python:pull token for registry-1.docker.io
+#6 DONE 0.0s
+
+#7 [airflow internal] load metadata for docker.io/apache/airflow:2.10.2-python3.11
+#7 DONE 1.7s
+
+#4 [generator internal] load metadata for docker.io/library/python:3.11-slim
+#4 DONE 1.7s
+
+#8 [airflow internal] load .dockerignore
+#8 transferring context: 2B done
+#8 DONE 0.0s
+
+#9 [airflow 1/4] FROM docker.io/apache/airflow:2.10.2-python3.11@sha256:7c68d8ac3cf1b2c69eeb91da64c1578dc8376d33abf34267bf6e547d071cae39
+#9 resolve docker.io/apache/airflow:2.10.2-python3.11@sha256:7c68d8ac3cf1b2c69eeb91da64c1578dc8376d33abf34267bf6e547d071cae39 0.0s done
+#9 DONE 0.0s
+
+#10 [airflow 2/4] RUN apt-get update && apt-get install -y     build-essential     && apt-get clean     && rm -rf /var/lib/apt/lists/*
+#10 CACHED
+
+#11 [generator internal] load .dockerignore
+#11 transferring context: 2B done
+#11 DONE 0.0s
+
+#12 [generator internal] load build context
+#12 transferring context: 157B done
+#12 DONE 0.0s
+
+#13 [generator 1/5] FROM docker.io/library/python:3.11-slim@sha256:158caf0e080e2cd74ef2879ed3c4e697792ee65251c8208b7afb56683c32ea6c
+#13 resolve docker.io/library/python:3.11-slim@sha256:158caf0e080e2cd74ef2879ed3c4e697792ee65251c8208b7afb56683c32ea6c 0.0s done
+#13 DONE 0.0s
+
+#14 [generator 2/5] WORKDIR /app
+#14 CACHED
+
+#15 [generator 4/5] RUN pip install --no-cache-dir -r requirements.txt
+#15 CACHED
+
+#16 [generator 3/5] COPY requirements.txt .
+#16 CACHED
+
+#17 [generator 5/5] COPY . .
+#17 CACHED
+
+#18 [generator] exporting to image
+#18 exporting layers done
+#18 exporting manifest sha256:8c09926a13a4bdd193c4caa541f07ee6cff33fe86b41894ec5d02fe479c91761 done
+#18 exporting config sha256:5f3bbe073b43112c9f3ee3f93f42e5e7054899fbe66a54fa684d3d83789d6543 done
+#18 exporting attestation manifest sha256:04e23af3e6095853393ffa20e4218819c36293e6c1f3ac0865987632bebe40f8 0.0s done
+#18 exporting manifest list sha256:bfe89d2c08f2eab57de568b819a696fcef910fda0248067131ea88f6f9dbd17f done
+#18 naming to docker.io/library/supply-chain-bda-generator:latest
+#18 naming to docker.io/library/supply-chain-bda-generator:latest done
+#18 unpacking to docker.io/library/supply-chain-bda-generator:latest done
+#18 DONE 0.1s
+
+#19 [generator] resolving provenance for metadata file
+#19 DONE 0.0s
+
+#20 [airflow 3/4] RUN pip install --no-cache-dir pymongo==4.8.0
+#20 2.088 Collecting pymongo==4.8.0
+#20 2.468   Downloading pymongo-4.8.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl.metadata (22 kB)
+#20 2.508 Requirement already satisfied: dnspython<3.0.0,>=1.16.0 in /home/airflow/.local/lib/python3.11/site-packages (from pymongo==4.8.0) (2.6.1)
+#20 2.620 Downloading pymongo-4.8.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (1.4 MB)
+#20 3.116    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.4/1.4 MB 4.6 MB/s eta 0:00:00
+#20 3.364 Installing collected packages: pymongo
+#20 3.516 Successfully installed pymongo-4.8.0
+#20 3.992 
+#20 3.992 [notice] A new release of pip is available: 24.2 -> 25.3
+#20 3.992 [notice] To update, run: pip install --upgrade pip
+#20 DONE 4.2s
+
+#21 [airflow 4/4] WORKDIR /opt/airflow
+#21 DONE 0.0s
+
+#22 [airflow] exporting to image
+#22 exporting layers 7.8s done
+#22 exporting manifest sha256:aa161f1bbff6e830501905a284dfe746a90cd6afb0d3161b19e4255f7a0bc30a done
+#22 exporting config sha256:b1472dd60e7a6a248e6cd39e269ba7dd87beddcbff822c8ce324a8c4fced5475 done
+#22 exporting attestation manifest sha256:fc7b1313e16bb6ccf2f14edb934682bb70ef09fbfbe6a7d27de82a872eb9b78b done
+#22 exporting manifest list sha256:6f33473b2f2896426e0f99946a27e67c6e912c452aab2cf7456815f677486f59 done
+#22 naming to docker.io/library/supply-chain-bda-airflow:latest done
+#22 unpacking to docker.io/library/supply-chain-bda-airflow:latest
+#22 unpacking to docker.io/library/supply-chain-bda-airflow:latest 1.5s done
+#22 DONE 9.4s
+
+#23 [airflow] resolving provenance for metadata file
+#23 DONE 0.0s
+ supply-chain-bda-airflow  Built
+ supply-chain-bda-generator  Built
+ Network supply-chain-bda_default  Creating
+ Network supply-chain-bda_default  Created
+ Volume "supply-chain-bda_mongo_data"  Creating
+ Volume "supply-chain-bda_mongo_data"  Created
+ Volume "supply-chain-bda_airflow_db"  Creating
+ Volume "supply-chain-bda_airflow_db"  Created
+ Container mongo  Creating
+ Container mongo  Created
+ Container generator  Creating
+ Container airflow  Creating
+ Container generator  Created
+ Container airflow  Created
+ Container mongo  Starting
+ Container mongo  Started
+ Container mongo  Waiting
+ Container mongo  Waiting
+ Container mongo  Healthy
+ Container airflow  Starting
+ Container mongo  Healthy
+ Container generator  Starting
+ Container generator  Started
+ Container airflow  Started
