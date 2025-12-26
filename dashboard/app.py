@@ -693,10 +693,6 @@ def render_overview_page(kpis: Dict, filters: Dict):
     df_dc = kpis.get('dc_utilization', pd.DataFrame())
     df_stockout = kpis.get('stockout_alerts', pd.DataFrame())
     
-    # Apply filters
-    if not df_inv.empty and filters.get('dc') and filters['dc'] != 'All':
-        df_inv = df_inv[df_inv['dc_name'] == filters['dc']]
-    
     # Row 1: Revenue by Region + DC Utilization
     col1, col2 = st.columns(2)
     
@@ -790,16 +786,6 @@ def render_inventory_page(kpis: Dict, filters: Dict):
     
     if df_inv.empty:
         st.info("No inventory data available yet. Waiting for KPI computation...")
-        return
-    
-    # Apply filters
-    if filters.get('dc') and filters['dc'] != 'All':
-        df_inv = df_inv[df_inv['dc_name'] == filters['dc']]
-    if filters.get('sku') and filters['sku'] != 'All':
-        df_inv = df_inv[df_inv['product_name'] == filters['sku']]
-    
-    if df_inv.empty:
-        st.info("No data matching selected filters")
         return
     
     # Charts
@@ -1011,14 +997,6 @@ def render_stockout_page(kpis: Dict, filters: Dict):
         st.success("✓ No stockout risks detected. All inventory levels are healthy!")
         return
     
-    # Apply filters
-    if filters.get('dc') and filters['dc'] != 'All':
-        df_stockout = df_stockout[df_stockout['dc_name'] == filters['dc']]
-    
-    if df_stockout.empty:
-        st.info("No stockout risks for selected filters")
-        return
-    
     # Sort by severity
     df_stockout = df_stockout.sort_values('days_to_stockout')
     
@@ -1120,7 +1098,7 @@ def render_stockout_page(kpis: Dict, filters: Dict):
 # SIDEBAR & FILTERS
 # ============================================================
 def render_sidebar(kpis: Dict, redis_client) -> Dict:
-    """Render sidebar navigation and filters"""
+    """Render sidebar navigation"""
     with st.sidebar:
         st.markdown("## Navigation")
         
@@ -1129,31 +1107,6 @@ def render_sidebar(kpis: Dict, redis_client) -> Dict:
             ["Overview", "Inventory", "Supplier", "Location / DC", "Stockout Risk"],
             label_visibility="collapsed"
         )
-        
-        st.markdown("---")
-        st.markdown("## Filters")
-        
-        # Extract filter options
-        df_inv = kpis.get('inventory', pd.DataFrame())
-        
-        dcs = ['All']
-        skus = ['All']
-        categories = ['All']
-        
-        if not df_inv.empty:
-            if 'dc_name' in df_inv.columns:
-                dcs += sorted(df_inv['dc_name'].dropna().unique().tolist())
-            if 'product_name' in df_inv.columns:
-                skus += sorted(df_inv['product_name'].dropna().unique().tolist())
-            if 'category' in df_inv.columns:
-                categories += sorted(df_inv['category'].dropna().unique().tolist())
-        
-        filters = {
-            'page': page,
-            'dc': st.selectbox("Distribution Center", dcs, key='filter_dc'),
-            'sku': st.selectbox("SKU / Product", skus, key='filter_sku'),
-            'category': st.selectbox("Category", categories, key='filter_category')
-        }
         
         st.markdown("---")
         
@@ -1173,7 +1126,7 @@ def render_sidebar(kpis: Dict, redis_client) -> Dict:
         Auto-refresh: 60s
         """)
     
-    return filters
+    return {'page': page}
 
 # ============================================================
 # MAIN APPLICATION WITH ERROR HANDLING

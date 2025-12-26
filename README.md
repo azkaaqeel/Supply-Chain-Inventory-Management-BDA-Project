@@ -1,5 +1,13 @@
 # Supply Chain Analytics - Big Data Pipeline
 
+![Docker](https://img.shields.io/badge/Docker-20.10+-blue.svg)
+![Apache Airflow](https://img.shields.io/badge/Apache%20Airflow-2.10.2-orange.svg)
+![Apache Spark](https://img.shields.io/badge/Apache%20Spark-3.5.1-yellow.svg)
+![MongoDB](https://img.shields.io/badge/MongoDB-6.0-green.svg)
+![Redis](https://img.shields.io/badge/Redis-7-red.svg)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.29+-ff69b4.svg)
+![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
+
 A real-time Big Data Analytics pipeline for supply chain and inventory optimization. The system processes streaming supply chain events, computes key performance indicators (KPIs) using distributed analytics, and provides real-time visibility through an interactive dashboard.
 
 ## Table of Contents
@@ -34,7 +42,91 @@ The system is containerized using Docker Compose and consists of the following c
 
 **HDFS** provides cold storage for historical data. When MongoDB exceeds a configurable threshold (300MB by default, 30MB in demo mode), older data is archived to HDFS in Parquet format, partitioned by date and hour, with metadata JSON files tracking archive batches.
 
-**Analytics Dashboard** is a Streamlit application that visualizes KPIs in real-time. It reads pre-computed metrics from Redis, applies client-side filters, and auto-refreshes every 60 seconds.
+**Analytics Dashboard** is a Streamlit application that visualizes KPIs in real-time. It reads pre-computed metrics from Redis and auto-refreshes every 60 seconds.
+
+### System Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "Data Generation Layer"
+        GEN[Data Generator<br/>1500 events/min]
+    end
+    
+    subgraph "Hot Storage"
+        MONGO[(MongoDB<br/>Hot Data Store)]
+    end
+    
+    subgraph "Orchestration"
+        AIRFLOW[Airflow Scheduler<br/>DAG Orchestration]
+    end
+    
+    subgraph "Processing Layer"
+        SPARK_MASTER[Spark Master]
+        SPARK_WORKER[Spark Worker]
+        SPARK_MASTER --> SPARK_WORKER
+    end
+    
+    subgraph "Cold Storage"
+        HDFS[HDFS<br/>Parquet Archives]
+    end
+    
+    subgraph "Cache Layer"
+        REDIS[(Redis<br/>KPI Cache)]
+    end
+    
+    subgraph "Visualization"
+        DASHBOARD[Streamlit Dashboard<br/>Real-time Analytics]
+    end
+    
+    GEN -->|Streams Events| MONGO
+    AIRFLOW -->|Triggers Every 1min| SPARK_MASTER
+    SPARK_WORKER -->|Reads| MONGO
+    SPARK_WORKER -->|Reads| HDFS
+    SPARK_WORKER -->|Writes KPIs| REDIS
+    AIRFLOW -->|Archives When >300MB| HDFS
+    DASHBOARD -->|Reads KPIs| REDIS
+```
+
+### Data Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant GEN as Data Generator
+    participant MONGO as MongoDB
+    participant AIRFLOW as Airflow
+    participant SPARK as Spark Cluster
+    participant REDIS as Redis
+    participant HDFS as HDFS
+    participant DASH as Dashboard
+    
+    loop Every 60 seconds
+        GEN->>MONGO: Write events (orders, shipments, inventory)
+    end
+    
+    loop Every 1 minute
+        AIRFLOW->>SPARK: Trigger KPI computation
+        SPARK->>MONGO: Read last 15 min data
+        SPARK->>HDFS: Read historical archives (if exists)
+        SPARK->>SPARK: Union hot + cold data
+        SPARK->>SPARK: Compute KPIs (joins, aggregations)
+        SPARK->>REDIS: Write KPIs (JSON, 60s TTL)
+    end
+    
+    loop Every 5 minutes
+        AIRFLOW->>MONGO: Check database size
+        alt Size > Threshold
+            AIRFLOW->>SPARK: Trigger archival
+            SPARK->>MONGO: Read old data (>2 hours)
+            SPARK->>HDFS: Write Parquet (partitioned)
+            SPARK->>MONGO: Delete archived data
+        end
+    end
+    
+    loop Every 60 seconds
+        DASH->>REDIS: Read KPIs
+        DASH->>DASH: Render visualizations
+    end
+```
 
 ## End-to-End Execution Flow
 
@@ -44,7 +136,7 @@ Airflow scheduler monitors DAG schedules and triggers tasks accordingly. The `co
 
 The Spark job reads recent data from MongoDB (last 15 minutes by default), optionally reads historical data from HDFS archives, and performs a logical union of hot and cold data. It joins fact tables with dimension tables, applies aggregations and window functions, and computes five KPIs: total inventory level by SKU and distribution center, stockout risk (days until stockout), supplier lead time performance, distribution center utilization rate, and regional revenue and order fulfillment metrics.
 
-Computed KPIs are serialized to JSON and written to Redis with appropriate keys. The dashboard continuously polls Redis, deserializes the data, applies user-selected filters, and renders visualizations.
+Computed KPIs are serialized to JSON and written to Redis with appropriate keys. The dashboard continuously polls Redis, deserializes the data, and renders visualizations.
 
 The `archive_to_hdfs_phase2` DAG runs every five minutes. It first checks MongoDB database size. If the size exceeds the configured threshold, it triggers a Spark archival job that reads data older than a cutoff time, writes it to HDFS in Parquet format with date/hour partitioning, generates metadata JSON, and deletes the archived data from MongoDB.
 
@@ -56,6 +148,31 @@ KPI computation involves multi-table joins between fact and dimension tables. Fo
 
 The system implements a unified OLAP pattern where Spark logically unions recent MongoDB data with historical HDFS archives at query time. This provides comprehensive analytics without physically merging data or copying archives back to MongoDB.
 
+### OLAP Unification Pattern
+
+```mermaid
+graph LR
+    subgraph "Hot Tier"
+        MONGO_HOT[(MongoDB<br/>Last 15 min)]
+    end
+    
+    subgraph "Cold Tier"
+        HDFS_COLD[(HDFS<br/>Historical Archives)]
+    end
+    
+    subgraph "Spark Processing"
+        SPARK_READ[Spark Reads]
+        SPARK_UNION[Logical Union]
+        SPARK_COMPUTE[Compute KPIs]
+    end
+    
+    MONGO_HOT -->|Read| SPARK_READ
+    HDFS_COLD -->|Read| SPARK_READ
+    SPARK_READ --> SPARK_UNION
+    SPARK_UNION --> SPARK_COMPUTE
+    SPARK_COMPUTE -->|Write| REDIS_OUT[(Redis Cache)]
+```
+
 Data refresh occurs at two levels: Spark recomputes KPIs every minute and writes to Redis, while the dashboard reads from Redis every 60 seconds. This design ensures the dashboard always displays metrics computed within the last minute, with Redis serving as a low-latency cache layer.
 
 ## Analytics Dashboard
@@ -64,7 +181,7 @@ The dashboard displays five executive KPIs: total inventory units across all SKU
 
 Interactive visualizations include inventory distribution by distribution center (stacked bar charts), revenue by region (donut charts), distribution center utilization versus capacity (horizontal bar charts with threshold indicators), and supplier performance analysis (scatter plots showing reliability versus lead time).
 
-The dashboard consumes precomputed KPIs from Redis. It does not query MongoDB directly or trigger Spark jobs. All filtering (by distribution center, SKU, or category) occurs client-side on data already loaded from Redis.
+The dashboard consumes precomputed KPIs from Redis. It does not query MongoDB directly or trigger Spark jobs. Navigation between different views (Overview, Inventory, Supplier, Location/DC, Stockout Risk) is available through the sidebar.
 
 The dashboard auto-refreshes every 60 seconds using Streamlit's rerun mechanism. Each refresh fetches the latest KPI data from Redis, ensuring users see metrics updated within the last minute. The dashboard displays a "Last Updated" timestamp sourced from Redis to indicate data freshness.
 
