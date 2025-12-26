@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, lit, sum as Fsum, avg as Favg, count as Fcount,
-    stddev as Fstddev, desc, expr, when
+    stddev as Fstddev, desc, expr, when, max as Fmax
 )
 
 # ============================================================
@@ -154,6 +154,10 @@ def main():
     print("\nComputing KPI 2: Stockout Risk...")
     
     # Calculate demand velocity (units per day)
+    # Convert 15-minute window to days: 15 minutes = 15/(24*60) = 15/1440 days
+    # Units per day = total_ordered / (window_minutes / 1440)
+    window_days = ANALYSIS_WINDOW_MINUTES / (24.0 * 60.0)
+    
     demand_velocity = (
         orders
         .groupBy("sku_id", "dc_id")
@@ -163,27 +167,47 @@ def main():
         )
         .withColumn(
             "units_per_day",
-            col("total_ordered") / lit(ANALYSIS_WINDOW_MINUTES / (24 * 60))
+            when(col("total_ordered") > 0,
+                 col("total_ordered") / lit(window_days)
+            ).otherwise(lit(0.0))
         )
     )
     
-    # Join with current inventory
+    # Join with current inventory and safety stock
+    # Note: safety_stock is constant per SKU-DC (stored in inventory_state)
+    # Using MAX to get the actual value (not average of identical values)
     kpi2_stockout_risk = (
         inventory
         .groupBy("sku_id", "dc_id")
-        .agg(Favg("on_hand_qty").alias("current_stock"))
+        .agg(
+            Favg("on_hand_qty").alias("current_stock"),
+            Fmax("safety_stock").alias("safety_stock")
+        )
         .join(demand_velocity, ["sku_id", "dc_id"], "left")
-        .fillna({"units_per_day": 0})
+        .fillna({"units_per_day": 0.0, "total_ordered": 0})
+        .withColumn(
+            "available_stock",
+            when(col("current_stock").isNull() | (col("current_stock") <= 0), lit(0.0))
+            .otherwise(col("current_stock") - col("safety_stock"))
+        )
         .withColumn(
             "days_to_stockout",
-            when(col("units_per_day") > 0, 
-                 col("current_stock") / col("units_per_day")
-            ).otherwise(lit(9999))
+            when(col("current_stock").isNull() | (col("current_stock") <= 0), lit(0.0))
+            .when(col("units_per_day") <= 0, lit(9999.0))
+            .when(col("available_stock") <= 0, lit(0.0))
+            .otherwise(col("available_stock") / col("units_per_day"))
         )
         .join(skus, "sku_id", "left")
         .join(dcs, "dc_id", "left")
         .join(regions.select("region_id", col("region_name")), 
               dcs["region_id"] == regions["region_id"], "left")
+        .withColumn(
+            "severity",
+            when(col("days_to_stockout") <= 3.0, lit("Critical"))
+            .when(col("days_to_stockout") <= 7.0, lit("Warning"))
+            .otherwise(lit("Normal"))
+        )
+        .where(col("days_to_stockout") < lit(STOCKOUT_THRESHOLD_DAYS))
         .select(
             "sku_id",
             "product_name",
@@ -191,15 +215,29 @@ def main():
             "dc_id",
             "dc_name",
             "region_name",
-            col("current_stock").cast("int").alias("stock_level"),
+            col("current_stock").cast("double").alias("stock_level"),
+            col("safety_stock").cast("double").alias("safety_stock_level"),
             col("units_per_day").cast("double").alias("demand_rate_per_day"),
-            col("days_to_stockout").cast("double").alias("days_until_stockout")
+            col("days_to_stockout").cast("double").alias("days_until_stockout"),
+            "severity"
         )
-        .where(col("days_to_stockout") < lit(STOCKOUT_THRESHOLD_DAYS))
         .orderBy("days_until_stockout")
     )
     
     kpi2_high_risk_count = kpi2_stockout_risk.count()
+    
+    # Log sample calculations for validation
+    if kpi2_high_risk_count > 0:
+        sample = kpi2_stockout_risk.limit(3).collect()
+        print(f"Sample stockout calculations:")
+        for row in sample:
+            # Spark Row objects use dictionary-style access, not .get()
+            safety_stock = row['safety_stock_level'] if 'safety_stock_level' in row else 0
+            print(f"  {row['product_name']} @ {row['dc_name']}: "
+                  f"Stock={row['stock_level']:.0f}, Safety={safety_stock:.0f}, "
+                  f"Demand={row['demand_rate_per_day']:.2f}/day, "
+                  f"Days={row['days_until_stockout']:.2f}")
+    
     print(f"WARNING: KPI 2: {kpi2_high_risk_count} high-risk items (< {STOCKOUT_THRESHOLD_DAYS} days supply)")
     
     # ========================================

@@ -42,12 +42,14 @@ with DAG(
         /opt/spark/bin/spark-submit \
             --master spark://spark-master:7077 \
             --conf spark.mongodb.read.connection.uri=mongodb://admin:admin123@mongo:27017/supply_chain?authSource=admin \
+            --conf spark.driver.memory=512m \
+            --conf spark.driver.maxResultSize=128m \
+            --conf spark.executor.memory=512m \
+            --conf spark.sql.shuffle.partitions=2 \
             --packages org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 \
-            --driver-memory 512m \
-            --executor-memory 512m \
             /opt/spark/jobs/compute_minute_kpis.py
         """,
-        execution_timeout=timedelta(minutes=3),
+        execution_timeout=timedelta(minutes=10),
     )
     
     # Single task in this DAG

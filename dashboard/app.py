@@ -522,67 +522,6 @@ def load_kpis(_redis_client) -> Dict[str, Any]:
     return kpis
 
 # ============================================================
-# DEBUG UTILITY
-# ============================================================
-def render_debug_panel(redis_client):
-    """Debug panel to inspect Redis keys and data structure"""
-    with st.expander("🔍 Debug: Redis Data Inspector", expanded=False):
-        if not redis_client:
-            st.error("Redis not connected")
-            return
-        
-        try:
-            # List all KPI keys
-            keys = redis_client.keys("kpi:*")
-            st.write(f"**Found {len(keys)} KPI keys**")
-            
-            for key in sorted(keys):
-                st.markdown(f"---\n**Key:** `{key}`")
-                
-                try:
-                    # Get data type
-                    data_type = redis_client.type(key)
-                    st.write(f"Type: `{data_type}`")
-                    
-                    # Get value
-                    value = redis_client.get(key)
-                    
-                    if value:
-                        # Show length
-                        st.write(f"Length: {len(value)} chars")
-                        
-                        # Try to parse as JSON
-                        try:
-                            parsed = json.loads(value)
-                            st.write("**Structure:**")
-                            
-                            if isinstance(parsed, list):
-                                st.write(f"- List with {len(parsed)} items")
-                                if len(parsed) > 0:
-                                    st.write("- First item keys:", list(parsed[0].keys()) if isinstance(parsed[0], dict) else "N/A")
-                            elif isinstance(parsed, dict):
-                                st.write(f"- Dict with keys:", list(parsed.keys()))
-                            else:
-                                st.write(f"- Value: {parsed}")
-                            
-                            # Show preview (first 500 chars)
-                            preview = str(parsed)[:500]
-                            st.code(preview, language='json')
-                            
-                        except json.JSONDecodeError:
-                            st.write("**Raw value (first 500 chars):**")
-                            st.code(value[:500])
-                    else:
-                        st.write("(empty)")
-                        
-                except Exception as e:
-                    st.error(f"Error inspecting {key}: {e}")
-                    
-        except Exception as e:
-            st.error(f"Error listing keys: {e}")
-            st.code(traceback.format_exc())
-
-# ============================================================
 # DASHBOARD COMPONENTS
 # ============================================================
 def render_header(last_update, data_freshness):
@@ -703,7 +642,7 @@ def render_overview_page(kpis: Dict, filters: Dict):
                 values=df_regional['total_revenue'],
                 hole=0.5,
                 marker=dict(colors=[THEME['primary'], THEME['secondary'], THEME['success'], 
-                                   THEME['warning'], THEME['danger']]),
+                           THEME['warning'], THEME['danger']]),
                 textinfo='label+percent',
                 hovertemplate='<b>%{label}</b><br>Revenue: $%{value:,.0f}<extra></extra>'
             )])
@@ -751,7 +690,7 @@ def render_overview_page(kpis: Dict, filters: Dict):
         else:
             st.info("No DC utilization data available yet")
     
-    # Row 2: Inventory Heatmap
+    # Row 2: Inventory Heatmap (full width)
     if not df_inv.empty and 'dc_name' in df_inv.columns and 'product_name' in df_inv.columns:
         st.markdown("---")
         
@@ -997,102 +936,114 @@ def render_stockout_page(kpis: Dict, filters: Dict):
         st.success("✓ No stockout risks detected. All inventory levels are healthy!")
         return
     
-    # Sort by severity
+    # Sort by urgency (most critical first)
     df_stockout = df_stockout.sort_values('days_to_stockout')
     
-    col1, col2 = st.columns([2, 1])
+    # Summary stats at top
+    critical_count = len(df_stockout[df_stockout['severity'] == 'critical'])
+    high_count = len(df_stockout[df_stockout['severity'] == 'high'])
+    warning_count = len(df_stockout[df_stockout['severity'] == 'medium'])
     
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        # Horizontal bar chart
-        colors = [THEME['danger'] if d < 3 else THEME['warning'] if d < 5 else THEME['success'] 
-                 for d in df_stockout['days_to_stockout']]
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=df_stockout['days_to_stockout'],
-            y=df_stockout['product_name'] if 'product_name' in df_stockout.columns else df_stockout['sku_id'],
-            orientation='h',
-            marker=dict(color=colors),
-            text=df_stockout['days_to_stockout'].round(1),
-            textposition='auto',
-            hovertemplate='<b>%{y}</b><br>Days to stockout: %{x:.1f}<extra></extra>'
-        ))
-        
-        fig.add_vline(x=7, line_dash="dash", line_color=THEME['warning'], 
-                     annotation_text="Warning (7 days)")
-        fig.add_vline(x=3, line_dash="dash", line_color=THEME['danger'],
-                     annotation_text="Critical (3 days)")
-        
-        fig.update_layout(
-            title='Days to Stockout (sorted by urgency)',
-            xaxis_title='Days Until Stockout',
-            height=max(400, len(df_stockout) * 25),
-            template='plotly_white',
-            showlegend=False
-        )
-        st.plotly_chart(fig, use_container_width=True, key='stockout_bar')
-    
+        st.metric("Total Alerts", len(df_stockout))
     with col2:
-        st.markdown("### High-Risk Items")
+        st.metric("Critical", critical_count, delta=None, delta_color="inverse")
+    with col3:
+        st.metric("High Risk", high_count, delta=None, delta_color="inverse")
+    with col4:
+        st.metric("Warning", warning_count, delta=None, delta_color="off")
+    
+    st.markdown("---")
+    
+    # Create scrollable table with all items
+    st.markdown("### All Stockout Alerts")
+    
+    # Prepare table data
+    display_data = []
+    for idx, row in df_stockout.iterrows():
+        days = row['days_to_stockout']
+        product = row.get('product_name', row.get('sku_id', 'Unknown'))
+        dc = row.get('dc_name', row.get('dc_id', 'Unknown'))
+        stock = row.get('stock_level', 0)
+        demand = row.get('demand_rate_per_day', 0)
+        safety_stock = row.get('safety_stock_level', 0)
         
-        top_risks = df_stockout.head(15)
+        # Determine severity
+        if days < 1:
+            severity = "CRITICAL"
+            severity_color = THEME['danger']
+        elif days < 3:
+            severity = "HIGH"
+            severity_color = THEME['danger']
+        elif days < 7:
+            severity = "WARNING"
+            severity_color = THEME['warning']
+        else:
+            severity = "LOW"
+            severity_color = THEME['success']
         
-        for _, row in top_risks.iterrows():
-            days = row['days_to_stockout']
-            product = row.get('product_name', row.get('sku_id', 'Unknown'))
-            dc = row.get('dc_name', row.get('dc_id', 'Unknown'))
-            stock = row.get('stock_level', 0)
-            demand = row.get('demand_rate_per_day', 0)
-            
-            if days < 1:
-                status_class = 'status-danger'
-                status_text = 'CRITICAL'
-            elif days < 3:
-                status_class = 'status-warning'
-                status_text = 'HIGH'
-            elif days < 7:
-                status_class = 'status-warning'
-                status_text = 'MEDIUM'
-            else:
-                status_class = 'status-success'
-                status_text = 'LOW'
-            
-            # Format demand nicely
-            if demand >= 1000:
-                demand_str = f"{demand/1000:.1f}K"
-            else:
-                demand_str = f"{demand:.0f}"
-            
-            st.markdown(f"""
-            <div class="kpi-card" style="margin-bottom: 0.75rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <strong>{product}</strong>
-                    <span class="status-badge {status_class}">{status_text}</span>
-                </div>
-                <div style="margin-top: 0.5rem; font-size: 0.85rem; color: {THEME['text_secondary']};">
-                    DC: {dc}<br>
-                    Stock: <strong>{stock:,.0f}</strong> units<br>
-                    Demand: <strong>{demand_str}</strong> units/day<br>
-                    <span style="color: {THEME['danger']}; font-weight: 600;">
-                    {days:.2f} days until stockout
-                    </span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        # Format numbers
+        stock_str = f"{stock:,.0f}"
+        if demand >= 1000000:
+            demand_str = f"{demand/1000000:.2f}M"
+        elif demand >= 1000:
+            demand_str = f"{demand/1000:.1f}K"
+        else:
+            demand_str = f"{demand:,.0f}"
         
-        # Add summary metrics
-        if not df_stockout.empty:
-            st.markdown("---")
-            st.markdown("### Summary")
-            critical_count = len(df_stockout[df_stockout['severity'] == 'critical'])
-            high_count = len(df_stockout[df_stockout['severity'] == 'high'])
-            st.markdown(f"""
-            <div style="font-size: 0.9rem;">
-                🔴 Critical (< 1 day): <strong>{critical_count}</strong><br>
-                🟠 High (1-3 days): <strong>{high_count}</strong><br>
-                📊 Total at risk: <strong>{len(df_stockout)}</strong>
-            </div>
-            """, unsafe_allow_html=True)
+        display_data.append({
+            'Product': product,
+            'Distribution Center': dc,
+            'Current Stock': stock_str,
+            'Safety Stock': f"{safety_stock:,.0f}",
+            'Demand/Day': demand_str,
+            'Days Left': f"{days:.2f}",
+            'Severity': severity,
+            '_severity_color': severity_color,
+            '_days': days
+        })
+    
+    # Create DataFrame for display (remove internal columns)
+    display_df = pd.DataFrame(display_data)
+    display_df = display_df[['Product', 'Distribution Center', 'Current Stock', 'Safety Stock', 'Demand/Day', 'Days Left', 'Severity']]
+    
+    # Style the table
+    def style_severity(val):
+        if val == 'CRITICAL':
+            return f'background-color: {THEME["danger"]}20; color: {THEME["danger"]}; font-weight: 700; padding: 0.5rem;'
+        elif val == 'HIGH':
+            return f'background-color: {THEME["danger"]}15; color: {THEME["danger"]}; font-weight: 600; padding: 0.5rem;'
+        elif val == 'WARNING':
+            return f'background-color: {THEME["warning"]}15; color: {THEME["warning"]}; font-weight: 600; padding: 0.5rem;'
+        else:
+            return f'background-color: {THEME["success"]}10; color: {THEME["success"]}; font-weight: 500; padding: 0.5rem;'
+    
+    def style_days_left(val):
+        days = float(val)
+        if days < 1:
+            return f'color: {THEME["danger"]}; font-weight: 700;'
+        elif days < 3:
+            return f'color: {THEME["danger"]}; font-weight: 600;'
+        elif days < 7:
+            return f'color: {THEME["warning"]}; font-weight: 600;'
+        else:
+            return f'color: {THEME["text_primary"]};'
+    
+    # Apply styling
+    styled_df = display_df.style.applymap(
+        style_severity, subset=['Severity']
+    ).applymap(
+        style_days_left, subset=['Days Left']
+    )
+    
+    # Display the scrollable table
+    st.dataframe(
+        styled_df,
+        use_container_width=True,
+        hide_index=True,
+        height=600
+    )
 
 # ============================================================
 # SIDEBAR & FILTERS
@@ -1107,11 +1058,6 @@ def render_sidebar(kpis: Dict, redis_client) -> Dict:
             ["Overview", "Inventory", "Supplier", "Location / DC", "Stockout Risk"],
             label_visibility="collapsed"
         )
-        
-        st.markdown("---")
-        
-        # Debug panel toggle
-        render_debug_panel(redis_client)
         
         st.markdown("---")
         st.markdown("## About")
@@ -1177,10 +1123,6 @@ def main():
                 docker exec redis redis-cli KEYS "kpi:*"
                 ```
                 """)
-            
-            # Still show sidebar debug panel
-            with st.sidebar:
-                render_debug_panel(redis_client)
             
             time.sleep(60)
             st.rerun()

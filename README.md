@@ -16,6 +16,7 @@ A real-time Big Data Analytics pipeline for supply chain and inventory optimizat
 - [Architecture Overview](#architecture-overview)
 - [End-to-End Execution Flow](#end-to-end-execution-flow)
 - [Data Processing Model](#data-processing-model)
+- [Data Schema Documentation](docs/data_schema.md)
 - [Analytics Dashboard](#analytics-dashboard)
 - [Reliability and Observability](#reliability-and-observability)
 - [How to Run the System](#how-to-run-the-system)
@@ -148,6 +149,8 @@ KPI computation involves multi-table joins between fact and dimension tables. Fo
 
 The system implements a unified OLAP pattern where Spark logically unions recent MongoDB data with historical HDFS archives at query time. This provides comprehensive analytics without physically merging data or copying archives back to MongoDB.
 
+**For detailed schema documentation, field definitions, and data flow diagrams, see [Data Schema Documentation](docs/data_schema.md).**
+
 ### OLAP Unification Pattern
 
 ```mermaid
@@ -184,6 +187,8 @@ Interactive visualizations include inventory distribution by distribution center
 The dashboard consumes precomputed KPIs from Redis. It does not query MongoDB directly or trigger Spark jobs. Navigation between different views (Overview, Inventory, Supplier, Location/DC, Stockout Risk) is available through the sidebar.
 
 The dashboard auto-refreshes every 60 seconds using Streamlit's rerun mechanism. Each refresh fetches the latest KPI data from Redis, ensuring users see metrics updated within the last minute. The dashboard displays a "Last Updated" timestamp sourced from Redis to indicate data freshness.
+
+For detailed documentation on KPI definitions, calculations, and usage guidance, see [Dashboard KPI Documentation](docs/dashboard_kpis.md).
 
 ## Reliability and Observability
 
